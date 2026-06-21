@@ -1,0 +1,10 @@
+[project]
+name = "azilen"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastmcp>=3.4.2",
+    "mcp>=1.28.0",
+]
