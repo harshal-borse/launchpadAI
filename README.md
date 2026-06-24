@@ -10,15 +10,19 @@ Features
 
 Prerequisites
 
-- Python 3.10+
-- (Optional) Virtualenv
+- Python 3.11–3.13 (pinned in `.python-version`; fastmcp/pydantic are not yet compatible with 3.14)
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip + virtualenv
 
-Setup
+Setup (uv — recommended)
+
+1. uv sync
+   - This creates a `.venv` with the exact pinned dependencies from `uv.lock`.
+
+Setup (pip)
 
 1. python -m venv .venv && source .venv/bin/activate
 2. pip install --upgrade pip
-3. pip install fastmcp
-   - If you have additional requirements, add a requirements.txt and run `pip install -r requirements.txt`
+3. pip install "fastmcp>=3.4.2" "mcp>=1.28.0"
 
 Configuration
 
@@ -30,7 +34,7 @@ Configuration
 Running
 
 - Demo run (simulated Workday event + start server):
-  python main.py
+  uv run python main.py   # or: python main.py
   - This runs a simulated onboarding (simulate_workday_activation) and starts the MCP server.
 
 Using the prototype
@@ -43,7 +47,7 @@ Using the prototype
 How the Python prototype and n8n workflow relate
 
 - `main.py` is the code-first prototype: it simulates a Workday activation, calls an LLM decision helper, performs provisioning logic, and exposes audit/metrics endpoints via MCP.
-- `helioshr-onboarding-workflow.json` / `sample.json` are n8n workflow exports that model the same onboarding flow in a low-code automation tool: webhook trigger → AI node → provisioning nodes → Slack notification.
+- `helioshr-onboarding-workflow.json` is an n8n workflow export that models the same onboarding flow in a low-code automation tool: webhook trigger → Claude agent (decisioning) → provisioning nodes (Okta, Google Workspace, Slack, Jira) → Slack notification.
 - They are complementary, not the same runtime: one proves the backend orchestration and governance layer in Python, the other proves the same business process in n8n.
 
 n8n workflow import
@@ -78,6 +82,7 @@ Files added
 
 - ARCHITECTURE.md — Mermaid diagram + notes
 - TECHNICAL_WRITEUP.md — design, failure handling, governance, next steps
+- IMPLEMENTATION_SPEC.md — Deliverable 3 Option B: step-by-step build, API endpoints, auth approach, and MCP server definition
 - EXEC_SUMMARY.md — plain-language summary for People Ops
 - helioshr-onboarding-workflow.json — working n8n workflow import template with built-in nodes
 - AI_USAGE.md — detailed AI usage statement and manual contribution summary

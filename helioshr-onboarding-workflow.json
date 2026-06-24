@@ -23,72 +23,24 @@
       "name": "Workday Webhook Trigger",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2.1,
-      "position": [208, 352],
+      "position": [-16, 352],
       "credentials": {},
       "disabled": false,
       "webhookId": "087b2e9c-42d7-4be0-ac5c-2f32fe0fc5a9"
     },
     {
       "parameters": {
-        "operation": "create",
-        "firstName": "={{ $('Workday Webhook Trigger').item.json.body.first_name }}",
-        "lastName": "={{ $('Workday Webhook Trigger').item.json.body.last_name }}",
-        "login": "={{ $json.output.text }}",
-        "email": "={{ $json.output.text }}",
-        "getCreateFields": {},
-        "requestOptions": {}
-      },
-      "id": "5136f0f6-8e86-45c7-bb64-2796796bd1e9",
-      "name": "Okta Provisioner",
-      "type": "n8n-nodes-base.okta",
-      "typeVersion": 1,
-      "position": [784, 256],
-      "onError": "continueErrorOutput",
-      "credentials": {},
-      "disabled": false
-    },
-    {
-      "parameters": {
-        "select": "channel",
-        "channelId": {
-          "__rl": true,
-          "mode": "name",
-          "value": "it-provisioning-logs"
-        },
-        "text": "=:sparkles: **AI Onboarding Update for HeliosHR** :sparkles:\n**Employee:** {{ $(\"Workday Webhook Trigger\").item.json.body.first_name }} {{ $(\"Workday Webhook Trigger\").item.json.body.last_name }}\n**Email:** {{ $(\"Claude Orchestrator\").item.json.output.text }}\n**Status:** Automated account profiles provisioned into Okta and Google Workspace. System is operational.",
-        "otherOptions": {}
-      },
-      "id": "156b3ef9-a999-4fe1-ab91-7e7590cdc2ce",
-      "name": "Slack Operations Notifier",
-      "type": "n8n-nodes-base.slack",
-      "typeVersion": 2.5,
-      "position": [1232, 352],
-      "credentials": {},
-      "disabled": false
-    },
-    {
-      "parameters": {},
-      "id": "0a960044-1318-41bb-a9c9-295a96499bf1",
-      "name": "Merge Provisioning Results",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3.2,
-      "position": [1008, 352],
-      "credentials": {},
-      "disabled": false
-    },
-    {
-      "parameters": {
         "promptType": "define",
-        "text": "={{ $('Workday Webhook Trigger').item.json.body.first_name }} {{ $('Workday Webhook Trigger').item.json.body.last_name }} is joining as {{ $('Workday Webhook Trigger').item.json.body.title }} in {{ $('Workday Webhook Trigger').item.json.body.department }}. Generate a professional email address following company naming conventions.",
+        "text": "=New hire: {{ $('Workday Webhook Trigger').item.json.body.first_name }} {{ $('Workday Webhook Trigger').item.json.body.last_name }}, title \"{{ $('Workday Webhook Trigger').item.json.body.title }}\", department \"{{ $('Workday Webhook Trigger').item.json.body.department }}\". Produce the onboarding decision JSON.",
         "options": {
-          "systemMessage": "You are an HR automation assistant. Generate professional email addresses based on employee information. Return only the email address in the format: firstname.lastname@helioshr.com"
+          "systemMessage": "You are HeliosHR's onboarding orchestration agent. Given a new hire's name, title, and department, decide how to provision them. Apply least-privilege: only grant systems the role actually needs. Return ONLY minified JSON (no markdown, no prose) with exactly these keys:\n- email: string, format firstname.lastname@helioshr.com (lowercase)\n- systems: array of strings chosen from [\"Okta\",\"Google Workspace\",\"Slack\",\"Jira\",\"FreshService\",\"Salesforce\",\"AWS\"]\n- onboarding_message: a short, friendly status message for the IT provisioning Slack channel\n- risk_notes: any access-governance flags (e.g. elevated/admin access that needs human approval); use \"none\" if no concerns\nReturn nothing outside the JSON object."
         }
       },
       "id": "c23d031d-b5b1-4b16-912b-1f59c2a07256",
-      "name": "Claude Orchestrator",
+      "name": "Claude Decision Agent",
       "type": "@n8n/n8n-nodes-langchain.agent",
       "typeVersion": 3.1,
-      "position": [432, 352],
+      "position": [208, 352],
       "credentials": {},
       "disabled": false
     },
@@ -105,64 +57,146 @@
       "name": "Claude Model",
       "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
       "typeVersion": 1.5,
-      "position": [512, 576],
+      "position": [208, 576],
       "credentials": {},
       "disabled": false
     },
     {
       "parameters": {
-        "firstName": "={{ $('Workday Webhook Trigger').item.json.body.first_name }}",
-        "lastName": "={{ $('Workday Webhook Trigger').item.json.body.last_name }}",
-        "password": "TempPassword123!",
-        "username": "={{ $json.output.text.split(\"@\")[0] }}",
+        "jsCode": "// Parse the LLM decision robustly and expose clean fields for downstream provisioners.\nconst rawOut = $input.first().json.output;\nconst raw = (rawOut && typeof rawOut === 'object' && 'text' in rawOut) ? rawOut.text : rawOut;\nconst body = $('Workday Webhook Trigger').item.json.body;\n\nconst safeEmail = `${(body.first_name || '').toLowerCase().trim()}.${(body.last_name || '').toLowerCase().trim()}@helioshr.com`;\n\nlet decision;\ntry {\n  decision = typeof raw === 'string' ? JSON.parse(raw) : raw;\n} catch (e) {\n  // LLM returned non-JSON -> fall back to safe defaults (governance: never block onboarding on a bad LLM response)\n  decision = {\n    email: safeEmail,\n    systems: ['Okta', 'Google Workspace', 'Slack', 'Jira'],\n    onboarding_message: `Welcome ${body.first_name}! Your accounts are being provisioned.`,\n    risk_notes: 'LLM output was not valid JSON; applied safe default access set.'\n  };\n}\n\n// Validate email domain (access governance: external domains are never provisioned).\nconst email = (typeof decision.email === 'string' && /@helioshr\\.com$/.test(decision.email))\n  ? decision.email.toLowerCase()\n  : safeEmail;\n\nconst systems = Array.isArray(decision.systems) && decision.systems.length ? decision.systems : ['Okta', 'Google Workspace', 'Slack', 'Jira'];\n\nreturn [{\n  json: {\n    email,\n    username: email.split('@')[0],\n    systems,\n    onboarding_message: decision.onboarding_message || `Welcome ${body.first_name}!`,\n    risk_notes: decision.risk_notes || 'none',\n    first_name: body.first_name,\n    last_name: body.last_name,\n    department: body.department,\n    title: body.title\n  }\n}];"
+      },
+      "id": "b1f2e3d4-1111-2222-3333-444455556666",
+      "name": "Parse Decision",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [432, 352],
+      "credentials": {},
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "firstName": "={{ $json.first_name }}",
+        "lastName": "={{ $json.last_name }}",
+        "login": "={{ $json.email }}",
+        "email": "={{ $json.email }}",
+        "getCreateFields": {},
+        "requestOptions": {}
+      },
+      "id": "5136f0f6-8e86-45c7-bb64-2796796bd1e9",
+      "name": "Okta Provisioner",
+      "type": "n8n-nodes-base.okta",
+      "typeVersion": 1,
+      "position": [704, 144],
+      "onError": "continueErrorOutput",
+      "credentials": {},
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "firstName": "={{ $json.first_name }}",
+        "lastName": "={{ $json.last_name }}",
+        "password": "={{ 'Tmp-' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6).toUpperCase() + '!2' }}",
+        "username": "={{ $json.username }}",
         "domain": "helioshr.com",
-        "additionalFields": {}
+        "additionalFields": {
+          "changePasswordAtNextLogin": true
+        }
       },
       "id": "e384b67b-adc0-4944-b150-5b4ccf1680b2",
       "name": "Google Workspace Provisioner",
       "type": "n8n-nodes-base.gSuiteAdmin",
       "typeVersion": 1,
-      "position": [784, 448],
+      "position": [704, 352],
       "onError": "continueErrorOutput",
+      "credentials": {},
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "resource": "user",
+        "operation": "create",
+        "username": "={{ $json.username }}",
+        "emailAddress": "={{ $json.email }}",
+        "displayName": "={{ $json.first_name }} {{ $json.last_name }}",
+        "additionalFields": {}
+      },
+      "id": "a7c8d9e0-5555-6666-7777-888899990000",
+      "name": "Jira Provisioner",
+      "type": "n8n-nodes-base.jira",
+      "typeVersion": 1,
+      "position": [704, 560],
+      "onError": "continueErrorOutput",
+      "credentials": {},
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "id": "0a960044-1318-41bb-a9c9-295a96499bf1",
+      "name": "Merge Provisioning Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [960, 352],
+      "credentials": {},
+      "disabled": false
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "it-provisioning-logs"
+        },
+        "text": "=:sparkles: *AI Onboarding Update for HeliosHR* :sparkles:\n*Employee:* {{ $('Parse Decision').item.json.first_name }} {{ $('Parse Decision').item.json.last_name }} ({{ $('Parse Decision').item.json.title }}, {{ $('Parse Decision').item.json.department }})\n*Email:* {{ $('Parse Decision').item.json.email }}\n*Systems provisioned:* {{ $('Parse Decision').item.json.systems.join(', ') }}\n*Governance flags:* {{ $('Parse Decision').item.json.risk_notes }}\n*Agent note:* {{ $('Parse Decision').item.json.onboarding_message }}",
+        "otherOptions": {}
+      },
+      "id": "156b3ef9-a999-4fe1-ab91-7e7590cdc2ce",
+      "name": "Slack Operations Notifier",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.5,
+      "position": [1184, 352],
       "credentials": {},
       "disabled": false
     }
   ],
   "connections": {
-    "Okta Provisioner": {
-      "main": [
-        [
-          {
-            "node": "Merge Provisioning Results",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Merge Provisioning Results": {
-      "main": [
-        [
-          {
-            "node": "Slack Operations Notifier",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Workday Webhook Trigger": {
       "main": [
         [
           {
-            "node": "Claude Orchestrator",
+            "node": "Claude Decision Agent",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Claude Orchestrator": {
+    "Claude Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Claude Decision Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Decision Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Decision": {
       "main": [
         [
           {
@@ -174,16 +208,21 @@
             "node": "Google Workspace Provisioner",
             "type": "main",
             "index": 0
+          },
+          {
+            "node": "Jira Provisioner",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
     },
-    "Claude Model": {
-      "ai_languageModel": [
+    "Okta Provisioner": {
+      "main": [
         [
           {
-            "node": "Claude Orchestrator",
-            "type": "ai_languageModel",
+            "node": "Merge Provisioning Results",
+            "type": "main",
             "index": 0
           }
         ]
@@ -196,6 +235,28 @@
             "node": "Merge Provisioning Results",
             "type": "main",
             "index": 1
+          }
+        ]
+      ]
+    },
+    "Jira Provisioner": {
+      "main": [
+        [
+          {
+            "node": "Merge Provisioning Results",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge Provisioning Results": {
+      "main": [
+        [
+          {
+            "node": "Slack Operations Notifier",
+            "type": "main",
+            "index": 0
           }
         ]
       ]
